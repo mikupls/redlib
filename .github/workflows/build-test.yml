@@ -1,12 +1,15 @@
 name: Publish Docker image
 
+#on:
+#  release:
+#    types: [published]
+
 on:
-  release:
-    types: [published]
+  workflow_dispatch:
 
 jobs:
   push_to_registries:
-    name: Push Docker image to multiple registries
+    name: Push images
     runs-on: ubuntu-latest
     permissions:
       packages: write
