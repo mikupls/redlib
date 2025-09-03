@@ -1,20 +1,51 @@
-FROM alpine:3.19
+# supported versions here: https://hub.docker.com/_/rust
+ARG RUST_BUILDER_VERSION=slim-bookworm
+ARG UBUNTU_RELEASE_VERSION=noble
 
-ARG TARGET
+########################
+## builder image
+########################
+FROM rust:${RUST_BUILDER_VERSION} AS builder
 
-RUN apk add --no-cache curl
+WORKDIR /redlib
 
-RUN curl -L "https://github.com/redlib-org/redlib/releases/latest/download/redlib-${TARGET}.tar.gz" | \
-    tar xz -C /usr/local/bin/
+# download (most) dependencies in their own layer
+COPY Cargo.lock Cargo.toml ./
+RUN mkdir src && echo "fn main() { panic!(\"why am i running?\") }" > src/main.rs
+RUN cargo build --release --locked --bin redlib
+RUN rm ./src/main.rs && rmdir ./src
 
-RUN adduser --home /nonexistent --no-create-home --disabled-password redlib
+# copy the source and build the redlib binary
+COPY . ./
+RUN cargo build --release --locked --bin redlib
+RUN echo "finished building redlib!"
+
+########################
+## release image
+########################
+FROM ubuntu:${UBUNTU_RELEASE_VERSION} AS release
+
+# Install ca-certificates
+RUN apt-get update && apt-get install -y ca-certificates
+
+# Import redlib binary from builder
+COPY --from=builder /redlib/target/release/redlib /usr/local/bin/redlib
+
+# Add non-root user for running redlib
+RUN useradd \
+    --no-create-home \
+    --password "!" \
+    --comment "user for running redlib" \
+    redlib
 USER redlib
 
-# Tell Docker to expose port 8080
+# Document that we intend to expose port 8080 to whoever runs the container
 EXPOSE 8080
 
 # Run a healthcheck every minute to make sure redlib is functional
-HEALTHCHECK --interval=1m --timeout=3s CMD wget --spider -q http://localhost:8080/settings || exit 1
+HEALTHCHECK --interval=1m --timeout=3s CMD wget --spider --q http://localhost:8080/settings || exit 1
+
+# Add container metadata
+LABEL org.opencontainers.image.authors="sigaloid"
 
 CMD ["redlib"]
-
